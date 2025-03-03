@@ -1,0 +1,24 @@
+
+.element{
+    height: 80vh; /* For 100% screen height */
+    width:  80vw; /* For 100% screen width */
+}
+
+model-viewer{
+    width: 95vw;
+    height: 80vh;
+    margin: 0 auto;
+}
+.annotation{
+background-color: #f8f8f8;
+position: absolute;
+transform: translate(10px, 10px);
+
+}
+.annotation2{
+background-color: #f8f8f8;
+position: absolute;
+transform: translate(10px, 50px);
+border-radius: 10px;
+padding: 10px;
+}
