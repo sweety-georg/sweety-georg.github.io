@@ -1,1 +1,1 @@
-# sweety-georg.io
+# https://sweety-georg.github.io
