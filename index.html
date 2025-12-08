@@ -3,145 +3,200 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GPS & Compass Tracker</title>
+    <title>WebXR GPS-Oriented AR Cube</title>
     <style>
-        body { font-family: Arial, sans-serif; text-align: center; margin-top: 20px; }
-        #status { font-weight: bold; color: #0056b3; margin-bottom: 20px;}
-        .data { margin-bottom: 5px; font-size: 0.95em; }
-        button { padding: 10px 20px; margin: 5px; cursor: pointer; background-color: #007bff; color: white; border: none; border-radius: 5px; }
-        button:hover { background-color: #0056b3; }
-        
-        /* --- Compass Styles --- */
-        #compass-container {
-            width: 200px;
-            height: 200px;
-            margin: 20px auto;
-            position: relative;
-            border-radius: 50%;
-            border: 5px solid #333;
-            box-shadow: 0 0 10px rgba(0,0,0,0.5);
-            background-color: #fff;
-        }
-
-        /* Compass Face (Static Background) */
-        #compass-face {
-            width: 100%;
-            height: 100%;
+        body { margin: 0; overflow: hidden; background-color: #000; }
+        #ar-button {
             position: absolute;
-            top: 0;
-            left: 0;
-            border-radius: 50%;
-            background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200"><circle cx="100" cy="100" r="100" fill="%23fff"/><text x="100" y="25" text-anchor="middle" font-size="20" fill="red">N</text><text x="185" y="105" text-anchor="middle" font-size="20">E</text><text x="100" y="190" text-anchor="middle" font-size="20">S</text><text x="15" y="105" text-anchor="middle" font-size="20">W</text></svg>');
-            background-repeat: no-repeat;
-            background-size: cover;
-            /* Simple tick marks and direction labels are usually created using a background image or complex CSS */
-        }
-
-        /* Compass Arrow (Needle) - The element that rotates */
-        #compass-arrow {
-            width: 100%;
-            height: 100%;
-            position: absolute;
-            top: 0;
-            left: 0;
-            /* Set the rotation point to the center */
-            transform-origin: 50% 50%;
-            
-            /* The image data for a simple needle */
-            background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200"><polygon points="100,5 90,100 100,195 110,100" fill="red"/><circle cx="100" cy="100" r="10" fill="black"/></svg>');
-            background-repeat: no-repeat;
-            background-size: cover;
-        }
-        
-        /* Center dot for the arrow */
-        #center-dot {
-            width: 20px;
-            height: 20px;
-            position: absolute;
-            top: 50%;
+            bottom: 20px;
             left: 50%;
-            transform: translate(-50%, -50%);
-            border-radius: 50%;
-            background-color: black;
+            transform: translateX(-50%);
+            padding: 10px 20px;
+            font-size: 1.2em;
+            cursor: pointer;
+            background-color: #f00;
+            color: white;
+            border: none;
+            border-radius: 5px;
             z-index: 10;
         }
-
-        .heading-display {
-            font-size: 1.2em;
-            font-weight: bold;
-            color: red;
-            margin-top: 10px;
+        #status {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            font-family: Arial, sans-serif;
+            z-index: 10;
         }
-
     </style>
+    <script src="https://unpkg.com/three@0.160.0/build/three.js"></script>
+    <script src="https://unpkg.com/three@0.160.0/examples/js/libs/webxr-polyfill.js"></script>
+    <script src="https://unpkg.com/three@0.160.0/examples/jsm/webxr/ARButton.js"></script>
 </head>
 <body>
 
-    <h1>Mobile Location and Direction</h1>
-    <p id="status">Click "Start Tracking" to begin...</p>
-
-    <button onclick="startTracking()">Start Tracking</button>
-    <button onclick="stopTracking()">Stop Tracking</button>
-
-    <hr>
-
-    <h2>GPS Coordinates</h2>
-    <div class="data">
-        <strong>Latitude:</strong> <span id="latitude">N/A</span>
-    </div>
-    <div class="data">
-        <strong>Longitude:</strong> <span id="longitude">N/A</span>
-    </div>
-    <div class="data">
-        <strong>Accuracy:</strong> <span id="accuracy">N/A</span>
-    </div>
-
-    <hr>
-
-    <h2>Compass Direction</h2>
-    <div id="compass-container">
-        <div id="compass-face"></div>
-        <div id="compass-arrow"></div>
-        <div id="center-dot"></div>
-    </div>
-    <div class="heading-display">
-        Heading: <span id="heading">N/A</span> °
-    </div>
+    <div id="status">Status: Initializing...</div>
+    <div id="container"></div>
+    <button id="ar-button" disabled>AR Required</button>
 
     <script>
-        let watchID;
-        let orientationHandler = null;
+        // --- AR Variables ---
+        let camera, scene, renderer;
+        let controller;
+        let cube;
+        let arButton = document.getElementById('ar-button');
+        let statusElement = document.getElementById('status');
+        
+        // --- Orientation Variables ---
+        let currentHeading = 0; // 0 = North
+        let headingInitialized = false;
 
-        // --- GPS (Geolocation API) ---
-        function getCoordinates() {
-            if (!navigator.geolocation) {
-                document.getElementById('status').textContent = 'Geolocation is not supported by your browser.';
-                return;
-            }
+        // --- Core AR Setup (Simplified for ground placement) ---
+        
+        function init() {
+            scene = new THREE.Scene();
+            
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.xr.enabled = true;
+            document.getElementById('container').appendChild(renderer.domElement);
 
-            const options = {
-                enableHighAccuracy: true,
-                maximumAge: 0,
-                timeout: 5000
-            };
+            // Add lighting
+            scene.add(new THREE.HemisphereLight(0x808080, 0x606060, 1));
 
-            watchID = navigator.geolocation.watchPosition(
-                (position) => {
-                    document.getElementById('status').textContent = 'Location tracking active.';
-                    document.getElementById('latitude').textContent = position.coords.latitude.toFixed(6);
-                    document.getElementById('longitude').textContent = position.coords.longitude.toFixed(6);
-                    document.getElementById('accuracy').textContent = `${position.coords.accuracy.toFixed(2)} meters`;
-                    // Altitude removed for brevity, can be re-added if needed
-                },
-                (error) => {
-                    document.getElementById('status').textContent = `Geolocation Error (${error.code}): ${error.message}`;
-                },
-                options
-            );
+            // Initialize the AR button, which handles session setup
+            const button = ARButton.createButton(renderer, { requiredFeatures: ['hit-test', 'dom-overlay'], domOverlay: { root: document.body } });
+            arButton.replaceWith(button);
+            
+            renderer.setAnimationLoop(render);
+
+            window.addEventListener('resize', onWindowResize);
+            
+            // Start listening for device orientation
+            setupOrientationListener();
+        }
+        
+        function onWindowResize() {
+            renderer.setSize(window.innerWidth, window.innerHeight);
         }
 
-        // --- Direction (DeviceOrientation API) ---
-        function getDirection() {
+        // --- AR Logic: Placing the Cube on a Detected Surface ---
+        
+        let hitTestSource = null;
+        let hitTestSourceInitialized = false;
+        
+        renderer.xr.addEventListener('sessionstart', () => {
+             // In an AR session, the camera is managed by the XR system
+             statusElement.textContent = "Status: AR session started. Look for a surface...";
+        });
+        
+        renderer.xr.addEventListener('sessionend', () => {
+            hitTestSourceInitialized = false;
+            hitTestSource = null;
+            statusElement.textContent = "Status: AR session ended.";
+        });
+        
+        function render(timestamp, frame) {
+            if (frame) {
+                const session = renderer.xr.getSession();
+                const referenceSpace = renderer.xr.getReferenceSpace();
+
+                if (!hitTestSourceInitialized) {
+                    session.requestReferenceSpace('viewer').then(viewerSpace => {
+                        session.requestHitTestSource({ space: viewerSpace }).then(source => {
+                            hitTestSource = source;
+                            hitTestSourceInitialized = true;
+                            statusElement.textContent = "Status: Ready for placement.";
+                        });
+                    });
+                }
+                
+                if (hitTestSource && headingInitialized) {
+                    // Get hit test results for the center of the screen
+                    const hitTestResults = frame.getHitTestResults(hitTestSource);
+
+                    if (hitTestResults.length > 0) {
+                        const hit = hitTestResults[0];
+                        const pose = hit.getPose(referenceSpace);
+                        
+                        // We only place the cube once
+                        if (!cube) {
+                            placeCube(pose.transform.position);
+                        }
+                    }
+                }
+            }
+            renderer.render(scene, camera);
+        }
+
+        // --- Cube Placement Function ---
+        function placeCube(groundPosition) {
+            const geometry = new THREE.BoxGeometry(0.2, 0.2, 0.2); // 20cm cube
+            const material = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+            cube = new THREE.Mesh(geometry, material);
+            
+            // 1. Start from the detected ground position (0, Y, 0 in world space)
+            let cubePosition = new THREE.Vector3(0, 0, 0);
+            cubePosition.copy(groundPosition);
+            
+            // 2. Calculate the position 2 meters DUE NORTH from this point.
+            // North is defined by the Device Orientation (currentHeading).
+            // Rotation is typically applied around the Y-axis.
+            
+            // Convert heading to radians (360 degrees = 2 * PI radians).
+            // The browser's heading is usually 0 (North) to 360 clockwise.
+            // In Three.js, rotation is counter-clockwise, so we negate it.
+            // And since Three.js's default Z- is usually depth (forward), 
+            // the calculation is often: PI/2 - degrees_to_radians(heading)
+            
+            // Calculate the angle to rotate a vector pointing along the Z-axis (forward)
+            // to align with the current North heading.
+            const angleRadians = THREE.MathUtils.degToRad(currentHeading);
+            
+            // Create a vector representing the direction "forward" from the ground position
+            // (The AR session has established the ground plane coordinates)
+            let northVector = new THREE.Vector3(0, 0, -1); // -Z is often forward in Three.js world space
+            
+            // Rotate the vector by the compass heading around the Y-axis (up)
+            // Note: Since the cube should appear 2m NORTH regardless of the viewer's rotation, 
+            // we rotate a "due north" vector, not the viewer's current heading.
+            
+            // Simple 2D rotation matrix:
+            // X' = X * cos(A) - Z * sin(A)
+            // Z' = X * sin(A) + Z * cos(A)
+            
+            // Since we want 2m North, we start with a vector:
+            // x=0, z=-2 (2m away from the origin along the world's 'forward' axis)
+            
+            let distance = 2.0;
+            
+            // Calculate the delta X and Z components for 2m North
+            // Note: AR world space and compass North are not perfectly aligned.
+            // We assume the AR world's Z-axis aligns roughly with the phone's initial orientation.
+            
+            // Standard Compass math: X = distance * sin(angle), Z = distance * cos(angle)
+            // Three.js world space: X is East/West, Z is North/South.
+            // North (0 deg) should be -Z. East (90 deg) should be +X.
+            
+            const northX = distance * Math.sin(angleRadians);
+            const northZ = distance * Math.cos(angleRadians);
+            
+            // The cube is placed 2m North from the detected ground position.
+            // We add the offset to the ground position.
+            cubePosition.x += northX;
+            // The Y (height) remains the same as the ground, or slightly above
+            cubePosition.z -= northZ; // Assuming 0 deg is North, we subtract to go "up" the Z axis towards North
+            
+            cube.position.copy(cubePosition);
+            
+            scene.add(cube);
+            statusElement.textContent = `Status: Cube placed 2m North (Heading: ${currentHeading.toFixed(1)}°)`;
+        }
+
+
+        // --- Orientation Listener (Compass) ---
+        function setupOrientationListener() {
             // Check for iOS 13+ permission request
             if (typeof DeviceOrientationEvent.requestPermission === 'function') {
                 DeviceOrientationEvent.requestPermission()
@@ -149,75 +204,49 @@
                         if (permissionState === 'granted') {
                             addOrientationListener();
                         } else {
-                            document.getElementById('heading').textContent = 'Permission denied.';
+                            statusElement.textContent = 'Orientation permission denied.';
                         }
                     })
                     .catch(console.error);
             } else {
-                // Handle standard permission model (Android/Older iOS)
+                // Handle standard permission model
                 addOrientationListener();
             }
         }
 
         function addOrientationListener() {
-            const arrowElement = document.getElementById('compass-arrow');
-
-            orientationHandler = (event) => {
-                let absoluteHeading = null;
+            window.addEventListener('deviceorientation', (event) => {
+                let heading = null;
                 
-                // 1. iOS Specific (Most reliable for absolute North)
                 if (event.webkitCompassHeading !== undefined) {
-                    absoluteHeading = event.webkitCompassHeading;
-                } 
-                // 2. Standard W3C alpha (Can be absolute on some Android/Chrome, or relative)
-                else if (event.alpha !== null) {
-                    // For the visual compass, we need the rotation of the device relative to North.
-                    // The standard alpha value is often 0-360 where 0 is arbitrary or North (device dependent).
-                    // If it is an absolute heading, we often need to calculate 360 - alpha.
-                    // This is the most inconsistent part of the web API. We'll try 360 - alpha as a common pattern.
+                    // iOS Specific: Absolute North (0-360)
+                    heading = event.webkitCompassHeading;
+                } else if (event.alpha !== null) {
+                    // Standard W3C alpha (usually 360 - alpha for a compass reading, but varies)
                     if (event.absolute) {
-                       // If absolute is true, 360 - alpha is usually the heading.
-                       absoluteHeading = 360 - event.alpha; 
+                       heading = 360 - event.alpha; 
                     } else {
-                       // Fallback to alpha if absolute property is missing or false (may be relative)
-                       absoluteHeading = event.alpha; 
+                        // This case is unreliable for absolute North without magnetometer fusion.
+                        // We will use the alpha value as a fallback, but warn the user.
+                        heading = event.alpha;
                     }
                 }
                 
-                if (absoluteHeading !== null) {
-                    // Ensure the number is between 0 and 360
-                    const rotation = absoluteHeading % 360; 
-                    
-                    // Update the visual display and the arrow's rotation
-                    document.getElementById('heading').textContent = rotation.toFixed(1);
-                    arrowElement.style.transform = `rotate(${rotation}deg)`;
-                } else {
-                    document.getElementById('heading').textContent = 'N/A (Sensor Error)';
+                if (heading !== null) {
+                    // Ensure heading is 0-360
+                    currentHeading = heading % 360; 
+                    headingInitialized = true;
+                    // Update status for debugging
+                    if (!cube) {
+                         statusElement.textContent = `Status: Heading active. (N: ${currentHeading.toFixed(1)}°)`;
+                    }
                 }
-            };
-
-            window.addEventListener('deviceorientation', orientationHandler, true);
+            }, true);
         }
-
-        // --- Control Functions ---
-        function startTracking() {
-            document.getElementById('status').textContent = 'Requesting permissions...';
-            getCoordinates();
-            getDirection();
-        }
-
-        function stopTracking() {
-            if (watchID) {
-                navigator.geolocation.clearWatch(watchID);
-                watchID = null;
-            }
-            if (orientationHandler) {
-                window.removeEventListener('deviceorientation', orientationHandler, true);
-                orientationHandler = null;
-            }
-            document.getElementById('status').textContent = 'Tracking stopped.';
-            document.getElementById('compass-arrow').style.transform = `rotate(0deg)`; // Reset visual
-        }
+        
+        // --- Initialization ---
+        init();
+        
     </script>
 
 </body>
